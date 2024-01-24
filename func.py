@@ -135,18 +135,6 @@ def get_full_signal(path, Fs_new=500, f_sreza=0.7):
     return numpy_array
    
 
-def pointnetloss(outputs, labels, m3x3, m64x64, alpha=0.0001):
-    criterion = torch.nn.NLLLoss()
-    bs=outputs.size(0)
-    id3x3 = torch.eye(3, requires_grad=True).repeat(bs,1,1)
-    id64x64 = torch.eye(64, requires_grad=True).repeat(bs,1,1)
-    if outputs.is_cuda:
-        id3x3=id3x3.cuda()
-        id64x64=id64x64.cuda()
-    diff3x3 = id3x3-torch.bmm(m3x3,m3x3.transpose(1,2))
-    diff64x64 = id64x64-torch.bmm(m64x64,m64x64.transpose(1,2))
-    return criterion(outputs, labels) + alpha * (torch.norm(diff3x3)+torch.norm(diff64x64)) / float(bs)
-
 
 
 def plot_confusion_matrix(cm, classes, normalize=False, title='Confusion matrix', cmap=plt.cm.Blues):
@@ -257,16 +245,16 @@ def evaluate_model(model, data_loader):
     
 
 
-def train_pointnet(model_pointnet, dataloader_train, dataloader_val, batch_size, 
+def train_model(model, dataloader_train, dataloader_val, batch_size, 
                      name_save, start_weight=None, 
                      name_experiment=None, lr=1e-4, epochs=100,
                      scheduler=True, scheduler_step_size=10, dataset_name=None,
-                     f_sampling=700, seed=42, n_points=512,
-                     normalize='Centering and max value scaling', gamma=0.5, noise_std=0):
+                     f_sampling=500, seed=42, n_points=2048, num_channels=8,
+                     filt='ФВЧ 0.7 Гц', gamma=0.5, noise_std=0):
     """Обучение классификационной сверточной сети
 
     Args:
-        model_pointnet: Класс модели pytorch
+        model: Класс модели pytorch
 
         dataloader_train: Обучающий даталоудер
 
@@ -292,7 +280,7 @@ def train_pointnet(model_pointnet, dataloader_train, dataloader_val, batch_size,
 
         seed (int): Seed рандома. Defaults to 42.
         
-        normalize: Вид нормализации
+        filt: Вид фильтрации
 
         gamma: Величина коэффициента lr шедулера 
 
@@ -300,6 +288,7 @@ def train_pointnet(model_pointnet, dataloader_train, dataloader_val, batch_size,
 
     """
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    print(f'Обучение будет производиться на {device}')
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
@@ -319,8 +308,8 @@ def train_pointnet(model_pointnet, dataloader_train, dataloader_val, batch_size,
         name_experiment = name_save
     with mlflow.start_run(run_name=name_experiment) as run:
         
-        model = model_pointnet()
-        mlflow.log_param("Model", 'PointNet')
+        model = model()
+        mlflow.log_param("Model", model.__class__.__name__)
         if start_weight != None:
             model.load_state_dict(torch.load(start_weight))
 
@@ -332,9 +321,9 @@ def train_pointnet(model_pointnet, dataloader_train, dataloader_val, batch_size,
                                                         gamma=gamma_val)
         model = model.to(device)
         
-        mlflow.log_param("Normalize", normalize)
+        mlflow.log_param("filt", filt)
         mlflow.log_param("Training random noise std", noise_std)
-        mlflow.log_param("Input shape", f'torch.Size([batch_size, {n_points}, 3])')
+        mlflow.log_param("Input shape", f'torch.Size([batch_size, {num_channels}, {n_points}])')
         mlflow.log_param("F sampling ECG", f_sampling)
         mlflow.log_param("Points samping", n_points)
         if scheduler:
@@ -347,7 +336,7 @@ def train_pointnet(model_pointnet, dataloader_train, dataloader_val, batch_size,
         mlflow.log_param("lr", lr)
         mlflow.log_param("optimizer", 'Adam')
         mlflow.log_param("epochs", epochs)
-        mlflow.log_param("loss", 'NLLLoss + 0.0001*Loss_reg')
+        mlflow.log_param("loss", 'CrossEntropyLoss')
         mlflow.log_param("batch_size", batch_size)
         mlflow.log_param("dataset", dataset_name)
         mlflow.log_param("seed", seed)
@@ -357,6 +346,7 @@ def train_pointnet(model_pointnet, dataloader_train, dataloader_val, batch_size,
             mlflow.log_param("Fine-tuning", False)
 
         max_epoch_f1_val = 0
+        loss_func = nn.CrossEntropyLoss()
         for epoch in range(epochs): 
             model.train()
             running_loss = 0.0
@@ -365,9 +355,9 @@ def train_pointnet(model_pointnet, dataloader_train, dataloader_val, batch_size,
             for i, data in enumerate(dataloader_train, 0):
                 inputs, labels = data['signal'].to(device).float(), data['category'].to(device)
                 optimizer.zero_grad()
-                outputs, m3x3, m64x64 = model(inputs.transpose(1,2))
+                outputs = model(inputs)
+                loss = loss_func(outputs, labels)
                 
-                loss = pointnetloss(outputs, labels, m3x3, m64x64)
                 loss.backward()
                 optimizer.step()
 
@@ -394,8 +384,8 @@ def train_pointnet(model_pointnet, dataloader_train, dataloader_val, batch_size,
                 all_targets = []
                 for data in dataloader_val:
                     inputs, labels = data['signal'].to(device).float(), data['category'].to(device)
-                    outputs, m3x3, m64x64 = model(inputs.transpose(1,2))
-                    loss = pointnetloss(outputs, labels, m3x3, m64x64)
+                    outputs = model(inputs)
+                    loss = loss_func(outputs, labels)
 
                     running_loss += loss.item()
 
