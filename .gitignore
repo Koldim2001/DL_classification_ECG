@@ -1,0 +1,5 @@
+/test
+**/__pycache__/ 
+.ipynb_checkpoints
+/dataset
+/get_vECG.egg-info
