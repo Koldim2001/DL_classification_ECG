@@ -209,7 +209,7 @@ def evaluate_model(model, data_loader):
         for data in data_loader:
             inputs, labels = data['signal'].to(device).float(), data['category'].to(device)
  
-            outputs, _, _ = model(inputs.transpose(1,2))
+            outputs = model(inputs)
             _, predicted = torch.max(outputs, 1)
 
             true_labels.extend(labels.cpu().numpy())
@@ -307,8 +307,6 @@ def train_model(model, dataloader_train, dataloader_val, batch_size,
     if name_experiment == None:
         name_experiment = name_save
     with mlflow.start_run(run_name=name_experiment) as run:
-        
-        model = model()
         mlflow.log_param("Model", model.__class__.__name__)
         if start_weight != None:
             model.load_state_dict(torch.load(start_weight))
