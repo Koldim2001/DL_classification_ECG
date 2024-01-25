@@ -427,7 +427,7 @@ def train_model(model, dataloader_train, dataloader_val, batch_size,
         mlflow.log_metric("epoch of save", epoch_best)
 
         mlflow.log_artifact(name_save_model)
-        mlflow.log_artifact('model.py')
+        #mlflow.log_artifact('model.py')
 
 
 
